@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.2.0)"
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libfuse2 \
+            cmake \
+            g++ \
+            libclang-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: rust-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: rust-
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Update version numbers
+        run: |
+          # Update package.json
+          npm version ${{ inputs.version }} --no-git-tag-version --allow-same-version
+
+          # Update Cargo.toml
+          sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' src-tauri/Cargo.toml
+
+          # Update tauri.conf.json
+          sed -i 's/"version": ".*"/"version": "${{ inputs.version }}"/' src-tauri/tauri.conf.json
+
+      - name: Build Tauri app
+        run: npx tauri build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: StudyGuide v${{ inputs.version }}
+          generate_release_notes: true
+          files: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
